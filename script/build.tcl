@@ -1,5 +1,5 @@
 # *************************************************************************
-#
+#FIN_ovgu_Magdeburg
 # Copyright 2020 Xilinx, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -35,24 +35,18 @@ proc _do_impl {jobs {strategies ""}} {
     }
 }
 
-proc _do_post_impl {build_dir top impl_run {zynq_family 0} board} {
+proc _do_post_impl {build_dir top impl_run {zynq_family 0}} {
     if {$zynq_family} {
         current_run $impl_run
         set sdk_dir ${build_dir}/${top}.sdk
         file mkdir $sdk_dir
         write_hw_platform -fixed -force -include_bit -file ${sdk_dir}/${top}.xsa
     } else {
-        if {$board == "sn1022"} {
-            set mem_size 256
-            set start_address 0x00000000
-        } else {
-            set mem_size 128
-            set start_address 0x01002000
-        }
         set interface SPIx4
+        set start_address 0x01002000
         set bit_file ${build_dir}/${top}.runs/${impl_run}/${top}.bit
         set mcs_file ${build_dir}/${top}.runs/${impl_run}/${top}.mcs
-        write_cfgmem -format mcs -size $mem_size -interface $interface -loadbit "up $start_address $bit_file" -file "$mcs_file"
+        write_cfgmem -format mcs -size 128 -interface $interface -loadbit "up $start_address $bit_file" -file "$mcs_file"
     }
 }
 
@@ -84,7 +78,6 @@ set src_dir ${root_dir}/src
 #   max_pkt_len      Maximum packet length
 #   use_phys_func    Include H2C and C2H AXI-stream interfaces (0 or 1)
 #   num_phys_func    Number of PCI-e physical functions (1 to 4)
-#   num_qdma      Number of QDMA interfaces (1 to 2)
 #   num_queue        Number of QDMA queues (1 to 2048)
 #   num_cmac_port    Number of CMAC ports (1 or 2)
 #
@@ -104,6 +97,7 @@ array set build_options {
     -impl        0
     -post_impl   0
     -user_plugin ""
+    -user_build_dir ""
     -bitstream_userid  "0xDEADC0DE"
     -bitstream_usr_access "0x66669999"
     -sim  0
@@ -116,7 +110,6 @@ array set design_params {
     -max_pkt_len      1518
     -use_phys_func    1
     -num_phys_func    1
-    -num_qdma         1
     -num_queue        512
     -num_cmac_port    1
 }
@@ -163,19 +156,13 @@ if {$max_pkt_len < 256 || $max_pkt_len > 9600} {
     puts "Invalid value for -max_pkt_len: allowed range is \[256, 9600\]"
     exit
 }
-if {$use_phys_func == 1} {
-    if {$num_queue < 1 || $num_queue > 2048} {
-        puts "Invalid value for -num_queue: allowed range is \[1, 2048\]"
-        exit
-    }
-    if {$num_phys_func < 1 || $num_phys_func > 4} {
-        puts "Invalid value for -num_phys_func: allowed range is \[1, 4\]"
-        exit
-    }
-    if {$num_qdma < 1 || $num_qdma > 2} {
-        puts "Invalid value for -num_qdma: allowed range is \[1, 2\]"
-        exit
-    }
+if {$num_queue < 1 || $num_queue > 2048} {
+    puts "Invalid value for -num_queue: allowed range is \[1, 2048\]"
+    exit
+}
+if {$num_phys_func < 0 || $num_phys_func > 4} {
+    puts "Invalid value for -num_phys_func: allowed range is \[0, 4\]"
+    exit
 }
 if {$num_cmac_port != 1 && $num_cmac_port != 2} {
     puts "Invalid value for -num_cmac_port: allowed values are 1 and 2"
@@ -191,7 +178,11 @@ if {![string equal $tag ""]} {
     set build_name ${build_name}_${tag}
 }
 
-set build_dir [file normalize ${root_dir}/build/${build_name}]
+if {![string equal $user_build_dir ""]} {
+    set build_dir [file normalize $user_build_dir/${build_name}]
+} else {
+    set build_dir [file normalize ${root_dir}/build/${build_name}]
+}
 if {[file exists $build_dir]} {
     if {!$rebuild } {
         puts "Found existing build directory $build_dir"
@@ -223,7 +214,7 @@ close $fp
 
 # Update the board store
 if {[string equal $board_repo ""]} {
-    set_param board.repoPaths "${root_dir}/board_files"    
+    set_param board.repoPaths "${root_dir}/board_files"
     # xhub::refresh_catalog [xhub::get_xstores xilinx_board_store]
 } else {
     set_param board.repoPaths $board_repo
@@ -356,7 +347,7 @@ set include_dirs [get_property include_dirs [current_fileset]]
 foreach freq [list 250mhz 322mhz] {
     set box "box_$freq"
     set box_plugin ${user_plugin}/${box}
-    
+
     if {![file exists $box_plugin] || ![file exists ${user_plugin}/build_${box}.tcl]} {
         set box_plugin ${plugin_dir}/p2p/${box}
     }
@@ -398,7 +389,7 @@ read_vhdl -quiet [glob -nocomplain -directory $src_dir "*.vhd"]
 
 # Set vivado generic
 set design_params(-build_timestamp) "32'h$design_params(-build_timestamp)"
-set generic ""
+set generic [get_property generic [current_fileset]]
 foreach {key value} [array get design_params] {
     set p [string toupper [string range $key 1 end]]
     lappend generic "$p=$value"
@@ -445,9 +436,9 @@ if {$sim} {
 # Implement design
 if {$impl} {
     update_compile_order -fileset sources_1
-    _do_impl $jobs {"Vivado Implementation Defaults"}
+    _do_impl $jobs {"Performance_ExplorePostRoutePhysOpt"}
 }
 
 if {$post_impl} {
-    _do_post_impl $top_build_dir $top impl_1 $zynq_family ${board}
+    _do_post_impl $top_build_dir $top impl_1 $zynq_family
 }
